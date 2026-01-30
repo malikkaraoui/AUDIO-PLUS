@@ -212,7 +212,7 @@ function TranscribeTool({ models, selectedModel, setSelectedModel }) {
           {logs.length > 0 && (
             <div ref={logRef} className="bg-gray-900 rounded-lg p-3 max-h-40 overflow-y-auto font-mono text-xs space-y-1">
               {logs.map((l, i) => (
-                <div key={i} className={l.includes('✓') ? 'text-green-400' : 'text-gray-500'}>{l}</div>
+                <div key={i} className={l.includes('✓') ? 'text-green-400' : l.includes('⏳') ? 'text-yellow-400' : 'text-gray-500'}>{l}</div>
               ))}
             </div>
           )}

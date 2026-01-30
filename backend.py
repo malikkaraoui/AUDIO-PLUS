@@ -45,12 +45,15 @@ def transcribe_with_progress(file_path, use_cleanup=True, ollama_model="llama3.1
     total = len(audio)
     chunks = list(range(0, total, CHUNK_DURATION_MS))
     n = len(chunks)
-    model = get_model()
     texts = []
     total_steps = n * 2 if use_cleanup else n
 
     cancel_flag.clear()
     yield 0, "", "init", f"Audio chargé — durée {format_duration(total)}, {n} segment(s) de 5 min"
+    yield 0, "", "init", f"Modèle Whisper (medium) — chargement…"
+    model = get_model()
+    yield 0, "", "init", f"Modèle Whisper (medium) — prêt ✓"
+    yield 0, "", "init", f"LLM sélectionné : {ollama_model}"
 
     for i, start in enumerate(chunks):
         if cancel_flag.is_set():
@@ -58,6 +61,8 @@ def transcribe_with_progress(file_path, use_cleanup=True, ollama_model="llama3.1
             return
         end = min(start + CHUNK_DURATION_MS, total)
         log = f"[{i+1}/{n}] Whisper — segment {format_duration(start)}→{format_duration(end)}"
+        yield 0 if i == 0 else int(i / total_steps * 100), " ".join(texts), "transcription", f"{log} ⏳"
+
         seg = audio[start : start + CHUNK_DURATION_MS]
         tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
         seg.export(tmp.name, format="mp3")
