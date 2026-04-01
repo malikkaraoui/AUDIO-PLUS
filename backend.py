@@ -20,8 +20,9 @@ CORS(app)
 cancel_flag = threading.Event()
 
 SEGMENT_DURATION_MS = 10 * 60 * 1000  # 10 minutes
+OVERLAP_MS = 2 * 1000  # 2 seconds overlap between segments
 CHUNK_DURATION_MS = 5 * 60 * 1000  # 5 min chunks for progress tracking
-OUTPUT_DIR = os.path.expanduser("~/Downloads")
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "livraison")
 
 whisper_model = None
 
@@ -158,9 +159,12 @@ def split():
     audio = AudioSegment.from_mp3(file)
     total = len(audio)
     parts = []
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     for i, start in enumerate(range(0, total, SEGMENT_DURATION_MS)):
-        segment = audio[start : start + SEGMENT_DURATION_MS]
+        seg_start = max(0, start - OVERLAP_MS) if i > 0 else 0
+        seg_end = min(total, start + SEGMENT_DURATION_MS + OVERLAP_MS)
+        segment = audio[seg_start:seg_end]
         out_name = f"{base_name} - partie {i + 1}.mp3"
         out_path = os.path.join(OUTPUT_DIR, out_name)
         segment.export(out_path, format="mp3")
@@ -221,6 +225,39 @@ def transcribe_docx():
             os.unlink(tmp.name)
 
     return Response(generate(), mimetype="text/event-stream")
+
+
+TURBOSCRIBE_WATERMARK = "Transcrit par TurboScribe. Passez à Illimité pour supprimer ce message."
+
+
+@app.route("/merge-docx", methods=["POST"])
+def merge_docx():
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "Au moins un fichier DOCX requis"}), 400
+
+    merged = Document()
+    for f in sorted(files, key=lambda f: f.filename):
+        if not f.filename.lower().endswith(".docx"):
+            continue
+        doc = Document(f)
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if not text:
+                merged.add_paragraph("")
+                continue
+            if TURBOSCRIBE_WATERMARK in text:
+                continue
+            # Skip auto-generated title like "MUGNIER Jonathan - partie 1"
+            base = os.path.splitext(f.filename)[0]
+            if text == base:
+                continue
+            merged.add_paragraph(text)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "Fusion.docx")
+    merged.save(out_path)
+    return send_file(out_path, as_attachment=True, download_name="Fusion.docx")
 
 
 if __name__ == "__main__":

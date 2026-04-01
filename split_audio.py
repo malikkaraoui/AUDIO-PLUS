@@ -8,7 +8,8 @@ from tkinter import filedialog, messagebox
 from pydub import AudioSegment
 
 SEGMENT_DURATION_MS = 10 * 60 * 1000  # 10 minutes en millisecondes
-OUTPUT_DIR = os.path.expanduser("~/Downloads")
+OVERLAP_MS = 2 * 1000  # 2 seconds overlap between segments
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "livraison")
 
 
 def split_mp3(file_path):
@@ -17,8 +18,12 @@ def split_mp3(file_path):
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     parts = []
 
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
     for i, start in enumerate(range(0, total, SEGMENT_DURATION_MS)):
-        segment = audio[start : start + SEGMENT_DURATION_MS]
+        seg_start = max(0, start - OVERLAP_MS) if i > 0 else 0
+        seg_end = min(total, start + SEGMENT_DURATION_MS + OVERLAP_MS)
+        segment = audio[seg_start:seg_end]
         out_name = f"{base_name} - partie {i + 1}.mp3"
         out_path = os.path.join(OUTPUT_DIR, out_name)
         segment.export(out_path, format="mp3")

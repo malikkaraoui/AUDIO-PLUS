@@ -21,21 +21,20 @@ function App() {
         <h1 className="text-4xl font-bold text-center">AUDIO PLUS</h1>
 
         <div className="flex gap-2">
-          <button
-            onClick={() => setTab('split')}
-            className={`flex-1 py-2 rounded-lg font-medium transition ${tab === 'split' ? 'bg-white text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
-          >
-            Découper
-          </button>
-          <button
-            onClick={() => setTab('transcribe')}
-            className={`flex-1 py-2 rounded-lg font-medium transition ${tab === 'transcribe' ? 'bg-white text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
-          >
-            Transcrire
-          </button>
+          {['split', 'transcribe', 'merge'].map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`flex-1 py-2 rounded-lg font-medium transition ${tab === t ? 'bg-white text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+            >
+              {t === 'split' ? 'Découper' : t === 'transcribe' ? 'Transcrire' : 'Fusionner'}
+            </button>
+          ))}
         </div>
 
-        {tab === 'split' ? <SplitTool /> : <TranscribeTool models={models} selectedModel={selectedModel} setSelectedModel={setSelectedModel} />}
+        {tab === 'split' && <SplitTool />}
+        {tab === 'transcribe' && <TranscribeTool models={models} selectedModel={selectedModel} setSelectedModel={setSelectedModel} />}
+        {tab === 'merge' && <MergeTool />}
       </div>
     </div>
   )
@@ -242,6 +241,82 @@ function TranscribeTool({ models, selectedModel, setSelectedModel }) {
           {text}
         </div>
       )}
+    </>
+  )
+}
+
+function MergeTool() {
+  const [files, setFiles] = useState([])
+  const [status, setStatus] = useState('')
+  const [loading, setLoading] = useState(false)
+  const inputRef = useRef()
+
+  const handleMerge = async () => {
+    if (files.length === 0) return
+    setLoading(true)
+    setStatus('Fusion en cours…')
+
+    const formData = new FormData()
+    for (const f of files) formData.append('files', f)
+
+    try {
+      const res = await fetch('http://localhost:5001/merge-docx', {
+        method: 'POST',
+        body: formData,
+      })
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'Fusion.docx'
+        a.click()
+        URL.revokeObjectURL(url)
+        setStatus(`Terminé — ${files.length} fichier(s) fusionné(s)`)
+      } else {
+        const data = await res.json()
+        setStatus(`Erreur : ${data.error}`)
+      }
+    } catch {
+      setStatus('Erreur : impossible de joindre le serveur')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <p className="text-gray-400 text-center text-sm">Fusionner des DOCX et retirer la pub TurboScribe</p>
+      <div
+        onClick={() => inputRef.current.click()}
+        className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-gray-400 transition"
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".docx"
+          multiple
+          className="hidden"
+          onChange={(e) => { setFiles([...e.target.files]); setStatus('') }}
+        />
+        {files.length > 0 ? (
+          <div className="space-y-1">
+            {files.map((f, i) => (
+              <p key={i} className="text-white text-sm">{f.name}</p>
+            ))}
+          </div>
+        ) : (
+          <p className="text-gray-500">Cliquer pour choisir des fichiers DOCX</p>
+        )}
+      </div>
+      <button
+        onClick={handleMerge}
+        disabled={files.length === 0 || loading}
+        className="w-full bg-white text-black font-semibold py-3 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+      >
+        {loading ? 'Fusion…' : 'Fusionner'}
+      </button>
+      {status && !loading && <p className="text-sm text-gray-400 text-center">{status}</p>}
     </>
   )
 }
