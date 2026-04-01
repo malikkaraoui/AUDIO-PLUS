@@ -40,7 +40,7 @@ def format_duration(ms):
     return f"{s // 60}:{s % 60:02d}"
 
 
-def transcribe_with_progress(file_path, use_cleanup=True, ollama_model="llama3.1:8b"):
+def transcribe_with_progress(file_path, use_cleanup=True, llm_model="llama3.1:8b", provider="ollama"):
     """Split audio into chunks, transcribe each, yield progress."""
     audio = AudioSegment.from_mp3(file_path)
     total = len(audio)
@@ -49,12 +49,14 @@ def transcribe_with_progress(file_path, use_cleanup=True, ollama_model="llama3.1
     texts = []
     total_steps = n * 2 if use_cleanup else n
 
+    provider_label = "Groq" if provider == "groq" else "Ollama"
+
     cancel_flag.clear()
     yield 0, "", "init", f"Audio chargé — durée {format_duration(total)}, {n} segment(s) de 5 min"
     yield 0, "", "init", f"Modèle Whisper (medium) — chargement…"
     model = get_model()
     yield 0, "", "init", f"Modèle Whisper (medium) — prêt ✓"
-    yield 0, "", "init", f"LLM sélectionné : {ollama_model}"
+    yield 0, "", "init", f"LLM sélectionné : {provider_label} / {llm_model}"
 
     for i, start in enumerate(chunks):
         if cancel_flag.is_set():
@@ -83,9 +85,12 @@ def transcribe_with_progress(file_path, use_cleanup=True, ollama_model="llama3.1
             if cancel_flag.is_set():
                 yield 0, "", "cancelled", "Annulé par l'utilisateur"
                 return
-            log_c = f"[{i+1}/{n}] Correction Ollama ({ollama_model})"
+            log_c = f"[{i+1}/{n}] Correction {provider_label} ({llm_model})"
             yield progress, " ".join(texts + [raw_text]), "correction", log_c
-            cleaned = cleanup_with_ollama(raw_text, model=ollama_model)
+            if provider == "groq":
+                cleaned = cleanup_with_groq(raw_text, model=llm_model)
+            else:
+                cleaned = cleanup_with_ollama(raw_text, model=llm_model)
             texts.append(cleaned)
             step = n + (i + 1)
             progress = int(step / total_steps * 100)
@@ -131,16 +136,55 @@ def cleanup_with_ollama(text, model="llama3.1:8b"):
     return text
 
 
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+]
+
+
+def cleanup_with_groq(text, model="llama-3.3-70b-versatile"):
+    """Clean up transcription using Groq cloud API."""
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return text
+    try:
+        resp = http_requests.post(GROQ_API_URL, json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": CLEANUP_PROMPT.strip()},
+                {"role": "user", "content": text},
+            ],
+            "temperature": 0.2,
+        }, headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }, timeout=120)
+        if resp.ok:
+            return resp.json()["choices"][0]["message"]["content"]
+    except Exception:
+        pass
+    return text
+
+
 @app.route("/models", methods=["GET"])
 def models():
+    ollama_models = []
     try:
         resp = http_requests.get(OLLAMA_BASE + "/api/tags", timeout=5)
         if resp.ok:
-            names = [m["name"] for m in resp.json().get("models", [])]
-            return jsonify({"models": names})
+            ollama_models = [m["name"] for m in resp.json().get("models", [])]
     except Exception:
         pass
-    return jsonify({"models": []})
+
+    groq_available = bool(os.environ.get("GROQ_API_KEY", ""))
+
+    return jsonify({
+        "ollama": ollama_models,
+        "groq": GROQ_MODELS if groq_available else [],
+    })
 
 
 @app.route("/stop", methods=["POST"])
@@ -179,14 +223,15 @@ def transcribe():
     if not file or not file.filename.lower().endswith(".mp3"):
         return jsonify({"error": "Fichier MP3 requis"}), 400
 
-    ollama_model = request.form.get("model", "llama3.1:8b")
+    llm_model = request.form.get("model", "llama3.1:8b")
+    provider = request.form.get("provider", "ollama")
     tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
     file.save(tmp.name)
     tmp.close()
 
     def generate():
         try:
-            for progress, text, phase, log in transcribe_with_progress(tmp.name, ollama_model=ollama_model):
+            for progress, text, phase, log in transcribe_with_progress(tmp.name, llm_model=llm_model, provider=provider):
                 yield f"data: {json.dumps({'progress': progress, 'text': text, 'phase': phase, 'log': log})}\n\n"
         finally:
             os.unlink(tmp.name)
@@ -201,7 +246,8 @@ def transcribe_docx():
         return jsonify({"error": "Fichier MP3 requis"}), 400
 
     base_name = os.path.splitext(file.filename)[0]
-    ollama_model = request.form.get("model", "llama3.1:8b")
+    llm_model = request.form.get("model", "llama3.1:8b")
+    provider = request.form.get("provider", "ollama")
 
     tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
     file.save(tmp.name)
@@ -210,7 +256,7 @@ def transcribe_docx():
     def generate():
         try:
             text = ""
-            for progress, text, phase, log in transcribe_with_progress(tmp.name, ollama_model=ollama_model):
+            for progress, text, phase, log in transcribe_with_progress(tmp.name, llm_model=llm_model, provider=provider):
                 yield f"data: {json.dumps({'progress': progress, 'phase': phase, 'log': log})}\n\n"
 
             # Create DOCX

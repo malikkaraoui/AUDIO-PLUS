@@ -2,15 +2,26 @@ import { useState, useRef, useEffect } from 'react'
 
 function App() {
   const [tab, setTab] = useState('split')
-  const [models, setModels] = useState([])
+  const [ollamaModels, setOllamaModels] = useState([])
+  const [groqModels, setGroqModels] = useState([])
+  const [provider, setProvider] = useState('ollama')
   const [selectedModel, setSelectedModel] = useState('')
 
   useEffect(() => {
     fetch('http://localhost:5001/models')
       .then(r => r.json())
       .then(d => {
-        setModels(d.models || [])
-        if (d.models?.length) setSelectedModel(d.models[0])
+        const ollama = d.ollama || []
+        const groq = d.groq || []
+        setOllamaModels(ollama)
+        setGroqModels(groq)
+        if (ollama.length) {
+          setProvider('ollama')
+          setSelectedModel(ollama[0])
+        } else if (groq.length) {
+          setProvider('groq')
+          setSelectedModel(groq[0])
+        }
       })
       .catch(() => {})
   }, [])
@@ -33,7 +44,7 @@ function App() {
         </div>
 
         {tab === 'split' && <SplitTool />}
-        {tab === 'transcribe' && <TranscribeTool models={models} selectedModel={selectedModel} setSelectedModel={setSelectedModel} />}
+        {tab === 'transcribe' && <TranscribeTool ollamaModels={ollamaModels} groqModels={groqModels} provider={provider} setProvider={setProvider} selectedModel={selectedModel} setSelectedModel={setSelectedModel} />}
         {tab === 'merge' && <MergeTool />}
       </div>
     </div>
@@ -94,7 +105,7 @@ function SplitTool() {
   )
 }
 
-function TranscribeTool({ models, selectedModel, setSelectedModel }) {
+function TranscribeTool({ ollamaModels, groqModels, provider, setProvider, selectedModel, setSelectedModel }) {
   const [file, setFile] = useState(null)
   const [status, setStatus] = useState('')
   const [text, setText] = useState('')
@@ -105,7 +116,8 @@ function TranscribeTool({ models, selectedModel, setSelectedModel }) {
   const inputRef = useRef()
   const logRef = useRef()
 
-  const phaseLabel = { transcription: 'Transcription…', correction: 'Correction (Ollama)…', init: 'Initialisation…' }
+  const models = provider === 'groq' ? groqModels : ollamaModels
+  const phaseLabel = { transcription: 'Transcription…', correction: `Correction (${provider === 'groq' ? 'Groq' : 'Ollama'})…`, init: 'Initialisation…' }
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
@@ -134,6 +146,7 @@ function TranscribeTool({ models, selectedModel, setSelectedModel }) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('model', selectedModel)
+    formData.append('provider', provider)
 
     const url = asDocx ? 'http://localhost:5001/transcribe/docx' : 'http://localhost:5001/transcribe'
 
@@ -179,20 +192,46 @@ function TranscribeTool({ models, selectedModel, setSelectedModel }) {
     <>
       <p className="text-gray-400 text-center text-sm">Transcrire un MP3 en texte</p>
 
-      {models.length > 0 && (
-        <div className="flex items-center gap-3">
-          <label className="text-sm text-gray-400 shrink-0">Modèle LLM</label>
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:border-gray-500 outline-none"
-          >
-            {models.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </div>
-      )}
+      <div className="space-y-3">
+        {(ollamaModels.length > 0 || groqModels.length > 0) && (
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-gray-400 shrink-0">Provider</label>
+            <div className="flex flex-1 gap-2">
+              {ollamaModels.length > 0 && (
+                <button
+                  onClick={() => { setProvider('ollama'); setSelectedModel(ollamaModels[0]) }}
+                  className={`flex-1 py-1.5 text-sm rounded-lg font-medium transition ${provider === 'ollama' ? 'bg-white text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+                >
+                  Ollama
+                </button>
+              )}
+              {groqModels.length > 0 && (
+                <button
+                  onClick={() => { setProvider('groq'); setSelectedModel(groqModels[0]) }}
+                  className={`flex-1 py-1.5 text-sm rounded-lg font-medium transition ${provider === 'groq' ? 'bg-emerald-500 text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+                >
+                  Groq
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {models.length > 0 && (
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-gray-400 shrink-0">Modèle</label>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="flex-1 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:border-gray-500 outline-none"
+            >
+              {models.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
 
       <FilePicker file={file} setFile={(f) => { setFile(f); setStatus(''); setText(''); setProgress(0) }} inputRef={inputRef} />
 
